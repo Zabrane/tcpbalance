@@ -24,7 +24,7 @@
 %%%
 %%% It's possible to do, but you need to build some of your own
 %%% application management infrastructure ... which is beyond the scope
-%%% of this small hack.  Therefore, do not be surprised if you see 
+%%% of this small hack.  Therefore, do not be surprised if you see
 %%% assumptions that there's only one balance app running at a time.
 %%%
 %%% See http://www.erlang.org/doc/r9b/doc/system.html, in particular
@@ -39,16 +39,16 @@
 %% Func: start/2
 %% Returns: {ok, Pid}        |
 %%          {ok, Pid, State} |
-%%          {error, Reason}   
+%%          {error, Reason}
 %%----------------------------------------------------------------------
 start() ->
     %% io:format("XXX ~w:start/0\n", [?MODULE]),
     start(xxxwhocares, []).
-start(Type, []) ->
+start(_Type, []) ->
     %% io:format("XXX ~w:start/2 []\n", [?MODULE]),
     start(xxxwhocares, [local_tcp_port(), be_conn_timeout(),
 			be_inactivity_timeout()]);
-start(Type, StartArgs) ->
+start(_Type, StartArgs) ->
     %% io:format("XXX ~w:start/2 Type = ~w, StartArgs = ~w\n", [?MODULE, Type, StartArgs]),
     %%
     %% Application environment values: fetch via application:get_all_env et al.
@@ -57,13 +57,13 @@ start(Type, StartArgs) ->
     %%    2. from a .config file via "-config filename" on command line
     %%    3. from "-ethbridge keyX valX keyY valY ..."
     %%
-    bal_sup:start_link(StartArgs).    
+    bal_sup:start_link(StartArgs).
 
 %%----------------------------------------------------------------------
 %% Func: stop/1
-%% Returns: any 
+%% Returns: any
 %%----------------------------------------------------------------------
-stop(State) ->
+stop(_State) ->
     ok.
 
 %%%----------------------------------------------------------------------

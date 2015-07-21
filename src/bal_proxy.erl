@@ -107,7 +107,7 @@ reset_all(BalancerPid) ->
 %% NOTE: There is a limited attempt to check that NewBE is a sanely-
 %%       formatted "be" record, but it's still possible to send a
 %%       bogus "be" record to the balancer.  Caveat utilitor.
-add_be(BalancerPid, NewBE, AfterHost) when record(NewBE, be) ->
+add_be(BalancerPid, #be{}=NewBE, AfterHost) ->
     gen_server:call(BalancerPid, {add_be, NewBE, AfterHost},infinity).
 
 %% Delete a back-end host from the balancer's list.
@@ -146,7 +146,7 @@ init({LocalPort, ConnTimeout, ActTimeout}) ->
     {ok, TOTimer} = timer:send_interval(1000, {check_waiter_timeouts}),
     {ok, #state{local_port = LocalPort, conn_timeout = ConnTimeout,
 		act_timeout = ActTimeout, wait_list = queue:new(),
-		be_list = get_be_list(), start_time = now(), 
+		be_list = get_be_list(), start_time = now(),
 		to_timer = TOTimer, acceptor = Pid}}.
 
 %%----------------------------------------------------------------------
@@ -166,24 +166,24 @@ handle_call({Pid, get_be}, From, State) ->
 	Reply ->
 	    {reply, Reply, NewState}
     end;
-handle_call({Pid, remote_host, ok}, From, State) ->
+handle_call({Pid, remote_host, ok}, _From, State) ->
     NewState = update_host(State, Pid, ok),
     Reply = ok,
     {reply, Reply, NewState};
-handle_call({Pid, remote_host, error, Error}, From, State) ->
+handle_call({Pid, remote_host, error, Error}, _From, State) ->
     NewState = update_host(State, Pid, Error),
     Reply = ok,
     {reply, Reply, NewState};
-handle_call({get_state}, From, State) ->
+handle_call({get_state}, _From, State) ->
     Reply = State,
     {reply, Reply, State};
-handle_call({get_host, Host}, From, State) ->
+handle_call({get_host, Host}, _From, State) ->
     Reply = lists:keysearch(Host, #be.name, State#state.be_list),
     {reply, Reply, State};
-handle_call({reset_host, Host}, From, State) ->
+handle_call({reset_host, Host}, _From, State) ->
     {Reply, NewState} = reset_be(Host, State, up),
     {reply, Reply, NewState};
-handle_call({reset_host, Host, up}, From, State) ->
+handle_call({reset_host, Host, up}, _From, State) ->
     {Reply, NewState} = reset_be(Host, State, up),
     %% This is a dirty trick.  :-) Since we know that a backend is now
     %% up and available, we'll send a process exit message to ourself.
@@ -191,16 +191,16 @@ handle_call({reset_host, Host, up}, From, State) ->
     %% any, to be assigned a backend.
     self() ! {'EXIT', no_such_pid, another_host_is_up_now},
     {reply, Reply, NewState};
-handle_call({reset_host, Host, down}, From, State) ->
+handle_call({reset_host, Host, down}, _From, State) ->
     {Reply, NewState} = reset_be(Host, State, down),
     {reply, Reply, NewState};
-handle_call({reset_all}, From, State) ->
+handle_call({reset_all}, _From, State) ->
     {Reply, NewState} = reset_all_bes(State),
     {reply, Reply, NewState};
-handle_call({add_be, NewBE, AfterHost}, From, State) ->
+handle_call({add_be, NewBE, AfterHost}, _From, State) ->
     {Reply, NewState} = do_add_be(State, NewBE, AfterHost),
     {reply, Reply, NewState};
-handle_call({del_be, Host}, From, State) ->
+handle_call({del_be, Host}, _From, State) ->
     {Reply, NewState} = do_del_be(State, Host),
     {reply, Reply, NewState};
 handle_call(Request, From, State) ->
@@ -248,7 +248,7 @@ handle_info({'EXIT', Pid, Reason}, State) ->
 		{[], []} ->
 		    {noreply, NewState};
 		_ ->
-		    {{value, {From, FromPid, InsTime}}, NewQ} =
+		    {{value, {From, FromPid, _InsTime}}, NewQ} =
 			queue:out(NewState#state.wait_list),
 		    {Reply, NewState2} = choose_backend(From,FromPid,NewState),
 		    case Reply of
@@ -274,7 +274,7 @@ handle_info(Info, State) ->
 %% Purpose: Shutdown the server
 %% Returns: any (ignored by gen_server)
 %%----------------------------------------------------------------------
-terminate(Reason, State) ->
+terminate(_Reason, State) ->
     timer:cancel(State#state.to_timer),
     ok.
 
@@ -283,7 +283,7 @@ terminate(Reason, State) ->
 %% Purpose: Convert process state when code is changed
 %% Returns: {ok, NewState}
 %%----------------------------------------------------------------------
-code_change(OldVsn, State, Extra) ->
+code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%%----------------------------------------------------------------------
@@ -318,7 +318,7 @@ choose_backend(From, FromPid, State) ->
 
 choose_be(FromPid, State) ->
     choose_be(FromPid, State#state.be_list, []).
-choose_be(FromPid, [], BEList) ->
+choose_be(_FromPid, [], _BEList) ->
     sorry;
 choose_be(FromPid, [B|Bs], BEList) ->
     if
@@ -354,7 +354,7 @@ update_host(State, Pid, Status) ->
 	end,
     State#state{be_list = BEList, wait_list = WaitList}.
 
-update_belist([], BEList, Pid, Status) ->
+update_belist([], BEList, _Pid, _Status) ->
     {notfound, lists:reverse(BEList)};
 update_belist([B|Bs], BEList, Pid, Status) ->
     case lists:keymember(Pid, 2, B#be.pidlist) of
@@ -369,7 +369,7 @@ update_be(B, Pid, ok) ->
     Pending = B#be.pendconn,
     Active = B#be.actconn,
     B#be{pendconn = Pending - 1, actconn = Active + 1,
-	 act_count = B#be.act_count + 1, 
+	 act_count = B#be.act_count + 1,
 	 pidlist = lists:keyreplace(Pid, 2, B#be.pidlist, {active,Pid,now()})};
 update_be(B, Pid, exited) ->
     Active = B#be.actconn,
@@ -396,7 +396,7 @@ zap_q(Pid, Q, NewQ) ->
 		_ ->
 		    zap_q(Pid, RemQ, queue:in(I, NewQ))
 	    end;
-	{empty, RemQ} ->
+	{empty, _RemQ} ->
 	    NewQ
     end.
 
@@ -410,7 +410,7 @@ calc_elapsed({MSecStart, SecStart, MicroSecStart},
 reset_be(Host, State, Status) ->
     NewBEList = reset_be(Host, State#state.be_list, Status, []),
     {ok, State#state{be_list = NewBEList}}.
-reset_be(Host, [], Status, BEList) ->
+reset_be(_Host, [], _Status, BEList) ->
     lists:reverse(BEList);
 reset_be(Host, [B|Bs], Status, BEList) ->
     case B#be.name of
@@ -434,7 +434,7 @@ reset_each_be([B|Bs], State) ->
     {_, NewState} = reset_be(B, State, up),
     reset_each_be(Bs, NewState).
 
-do_add_be(State, NewBE, AfterHost) when record(NewBE, be) ->
+do_add_be(State, #be{}=NewBE, AfterHost) ->
     case catch sane_be(NewBE) of
 	true ->
 	    case lists:keymember(NewBE#be.name, #be.name,
@@ -442,7 +442,7 @@ do_add_be(State, NewBE, AfterHost) when record(NewBE, be) ->
 		true ->
 		    {{error, host_exists}, State};
 		_ ->
-		    {ok, State#state{be_list = 
+		    {ok, State#state{be_list =
 				     insert_be(NewBE, AfterHost,
 					       State#state.be_list)}}
 	    end;
@@ -454,7 +454,7 @@ do_del_be(State, Host) ->
     case lists:keymember(Host, #be.name,
 			 State#state.be_list) of
 	true ->
-	    {ok, State#state{be_list = 
+	    {ok, State#state{be_list =
 			     lists:keydelete(Host, #be.name,
 					     State#state.be_list)}};
 	_ ->
@@ -464,7 +464,7 @@ do_del_be(State, Host) ->
 %%% Being lazy, no tail recursion.
 %%% Interesting, there is no such insert func in stdlib "lists" module. {shrug}
 
-insert_be(NewBE, AfterHost, []) ->
+insert_be(NewBE, _AfterHost, []) ->
     [NewBE];
 insert_be(NewBE, "", BEList) ->
     [NewBE|BEList];
@@ -474,9 +474,9 @@ insert_be(NewBE, AfterHost, [B|Bs]) ->
     [B|insert_be(NewBE, AfterHost, Bs)].
 
 %%% QQQ Is there a less brute-force-ish way to do this?
-sane_be(B) ->
+sane_be(#be{}=B) ->
     Real = #be{},
-    if 
+    if
 	size(B) =/= size(Real) -> false;	% XXX Should use record_info()
 	%% not list(B#be.name) -> false;
 	B#be.name == "" -> false;
@@ -490,7 +490,7 @@ sane_be(B) ->
 	B#be.pidlist =/= [] -> false;
 	true -> true
     end;
-sane_be(B) ->
+sane_be(_B) ->
     false.
 
 check_waiter_timeouts(State) ->
@@ -509,7 +509,7 @@ zap_timeout_q(TOTime, Q, NewQ) ->
 		_ ->
 		    zap_timeout_q(TOTime, RemQ, queue:in(I, NewQ))
 	    end;
-	{empty, RemQ} ->
+	{empty, _RemQ} ->
 	    NewQ
     end.
 
@@ -517,7 +517,7 @@ zap_timeout_q(TOTime, Q, NewQ) ->
 %%% HTTP server stuff
 %%%
 
-http_get_state(Env, Input) ->
+http_get_state(_Env, _Input) ->
     [
      header(),
      top("Current Proxy State"),
@@ -541,7 +541,7 @@ format_proxy_state(State) ->
      "</pre>\n",
      "<table>\n",
      "<tr> ",
-     [["<td> <b>", X, "</b> "] || X <- ["Name", "Port", "Status", "MaxConn", 
+     [["<td> <b>", X, "</b> "] || X <- ["Name", "Port", "Status", "MaxConn",
 				       "PendConn", "ActConn", "LastErr",
 				       "LastErrTime", "ActiveCount",
 				       "ActiveTime"]],
@@ -556,7 +556,7 @@ format_be_list([], Acc) ->
     lists:reverse(Acc);
 format_be_list([B|Bs], Acc) ->
     LastErrTime = if
-		      tuple(B#be.lasterrtime) -> B#be.lasterrtime;
+		      B#be.lasterrtime -> B#be.lasterrtime;
 		      true -> {0,0,0}
 		  end,
     format_be_list(Bs, [[

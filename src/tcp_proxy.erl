@@ -37,9 +37,9 @@ init(LocalPort, BalancerPid) ->
 %%% accept_init() -- Runs in a process created by init(): open the TCP port
 %%%    to listen on, then call acceptor()
 %%%
-%%% acceptor() -- Accepts new TCP connections on the listening socket, 
+%%% acceptor() -- Accepts new TCP connections on the listening socket,
 %%%    spawns a new proxy process (implemented by the proxy() function),
-%%%    sets socket options on the new socket, transfers control of the 
+%%%    sets socket options on the new socket, transfers control of the
 %%%    socket to the new proxy proc, then sends a {go_for_it, ...} tuple
 %%%    to signal the proxy proc that it can now continue execution.
 %%%
@@ -70,7 +70,7 @@ acceptor(LSock, BalancerPid) ->
 
 proxy(CSock) ->
     receive
-	{go_for_it, CSock, BalancerPid, AcceptorPid} -> 
+	{go_for_it, CSock, BalancerPid, AcceptorPid} ->
 	    link(BalancerPid),
 	    unlink(AcceptorPid),
 	    ok
@@ -98,10 +98,10 @@ proxy2(CSock, BalancerPid, {ok, RHost, RPort, ConnTimeout, ActTimeout}) ->
 	    bal_proxy:remote_error(BalancerPid, Error),
 	    proxy2(CSock, BalancerPid, bal_proxy:get_be(BalancerPid))
     end;
-proxy2(CSock, BalancerPid, ?TIMEOUT_BE) ->
+proxy2(_CSock, _BalancerPid, ?TIMEOUT_BE) ->
     error_logger:format("~s:proxy: backend timeout, no backends available at this time\n", [?MODULE]),
     exit(normal);
-proxy2(CSock, BalancerPid, Answer) ->
+proxy2(_CSock, _BalancerPid, Answer) ->
     error_logger:format("~s:proxy: got bad answer = ~w\n", [?MODULE, Answer]),
     exit(bad_answer).
 
@@ -117,7 +117,7 @@ proxy2(CSock, BalancerPid, Answer) ->
 %%% state in State, horror!  :-)
 %%%
 
-proxy_loop(closed, closed, State) ->
+proxy_loop(closed, closed, _State) ->
     exit(byebye);
 proxy_loop(CSock, SSock, State) ->
     receive
@@ -127,7 +127,7 @@ proxy_loop(CSock, SSock, State) ->
 	{tcp, SSock, Data} ->
 	    gen_tcp:send(CSock, Data),
 	    proxy_loop(CSock, SSock, State);
-	{tcp_closed, Sock} ->
+	{tcp_closed, _Sock} ->
 	    exit(byebye);
 	{tcp_error, Sock} ->
 	    error_logger:format("~s:proxy_loop: socket ~w ERROR\n", [?MODULE, Sock]),
@@ -139,4 +139,3 @@ proxy_loop(CSock, SSock, State) ->
 	    error_logger:format("~s:proxy_loop: TIMEOUT after ~w\n", [?MODULE, State]),
 	    exit(byebye)
     end.
-

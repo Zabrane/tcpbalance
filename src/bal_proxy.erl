@@ -14,7 +14,7 @@
 -define(MUST_WAIT, must_wait).
 
 %% External exports
--export([start_link/1, start_link/3]).
+-export([start_link/1, start_link/5]).
 -export([get_be/1, remote_ok/1, remote_error/2]).
 -export([get_state/1, get_host/2, reset_host/2, reset_host/3, reset_all/1,
 	 add_be/3, del_be/2]).
@@ -28,6 +28,8 @@
 
 %% Overall state of the proxy
 -record(state, {
+	  register_name,            % Named pid of proxy
+	  local_ip, 			    % Local IP address
 	  local_port,				% Local TCP port number
 	  conn_timeout = (1*1000),		% Connection timeout (ms)
 	  act_timeout = (120*1000),		% Activity timeout (ms)
@@ -58,12 +60,12 @@
 %%%----------------------------------------------------------------------
 
 %% start_link/1 used by supervisor
-start_link([LocalPort, ConnTimeout, ActTimeout]) ->
-    start_link(LocalPort, ConnTimeout, ActTimeout).
+start_link([RegisterName, LocalIP, LocalPort, ConnTimeout, ActTimeout]) ->
+    start_link(RegisterName, LocalIP, LocalPort, ConnTimeout, ActTimeout).
 
-%% start_link/3 used by everyone else
-start_link(LocalPort, ConnTimeout, ActTimeout) ->
-    gen_server:start_link(?MODULE, {LocalPort, ConnTimeout, ActTimeout}, []).
+%% start_link/5 used by everyone else
+start_link(RegisterName, LocalIP, LocalPort, ConnTimeout, ActTimeout) ->
+    gen_server:start_link(?MODULE, {RegisterName, LocalIP, LocalPort, ConnTimeout, ActTimeout}, []).
 
 %% Choose an available back-end host
 get_be(BalancerPid) ->
@@ -125,11 +127,12 @@ del_be(BalancerPid, Host) ->
 %%          ignore               |
 %%          {stop, Reason}
 %%----------------------------------------------------------------------
-init({LocalPort, ConnTimeout, ActTimeout}) ->
-    Pid = ?TCPPROXY:init(LocalPort, self()),
+init({RegisterName, LocalIP, LocalPort, ConnTimeout, ActTimeout}) ->
+    Pid = ?TCPPROXY:init(LocalIP, LocalPort, self()),
     process_flag(trap_exit, true),
     %%register(list_to_atom("tcp_" ++ integer_to_list(LocalPort)), self()),
-    register(balance, self()),
+    % register(balance, self()),
+	register(RegisterName, self()),
     %%
     %% Unfortunately, we cannot always rely the death of a tcp_proxy proc
     %% to tell us when we need to remove a waiting request.  For example,
@@ -144,7 +147,7 @@ init({LocalPort, ConnTimeout, ActTimeout}) ->
     %% several seconds ago.
     %%
     {ok, TOTimer} = timer:send_interval(1000, {check_waiter_timeouts}),
-    {ok, #state{local_port = LocalPort, conn_timeout = ConnTimeout,
+    {ok, #state{register_name = RegisterName, local_ip = LocalIP, local_port = LocalPort, conn_timeout = ConnTimeout,
 		act_timeout = ActTimeout, wait_list = queue:new(),
 		be_list = get_be_list(), start_time = now(),
 		to_timer = TOTimer, acceptor = Pid}}.
@@ -295,7 +298,7 @@ get_be_list() ->
 	{ok, L} ->
 	    L;
 	_ ->
-	    error_logger:format("~s:get_be_list: warning: cannot file 'initial_be_list' in application environment\n", [?MODULE]),
+	    error_logger:format("~s:get_be_list: warning: cannot find 'initial_be_list' in application environment\n", [?MODULE]),
 	    []
     end.
 
@@ -534,6 +537,8 @@ format_proxy_state(State) ->
      %% From README: insert line here!
      io_lib:format("Proxy start time: ~s\n", [fmt_date(State#state.start_time)]),
      io_lib:format("Current time:     ~s\n", [fmt_date(now())]),
+	 io_lib:format("Name: ~s\n", [State#state.register_name]),
+	 io_lib:format("Local IP address: ~s\n", [State#state.local_ip]),
      io_lib:format("Local TCP port number: ~w\n", [State#state.local_port]),
      io_lib:format("Connection timeout (seconds): ~w\n", [State#state.conn_timeout / 1000]),
      io_lib:format("Activity timeout (seconds): ~w\n", [State#state.act_timeout / 1000]),

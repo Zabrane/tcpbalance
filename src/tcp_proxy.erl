@@ -13,15 +13,15 @@
 -define(BUFSIZ, (128*1024)).
 
 %% External exports
--export([init/1, init/2]).
+-export([init/2, init/3]).
 
 %% Internal exports
--export([accept_init/2, proxy/1]).
+-export([accept_init/3, proxy/1]).
 
-init(LocalPort) ->
-    init(LocalPort, self()).
-init(LocalPort, BalancerPid) ->
-    spawn_link(?MODULE, accept_init, [LocalPort, BalancerPid]).
+init(LocalIP, LocalPort) ->
+    init(LocalIP, LocalPort, self()).
+init(LocalIP, LocalPort, BalancerPid) ->
+    spawn_link(?MODULE, accept_init, [LocalIP, LocalPort, BalancerPid]).
 
 -record(state, {
 	  timeout,
@@ -44,8 +44,9 @@ init(LocalPort, BalancerPid) ->
 %%%    to signal the proxy proc that it can now continue execution.
 %%%
 
-accept_init(LPort, BalancerPid) ->
-    {ok, LSock} = gen_tcp:listen(LPort, [binary, {backlog, 256},
+accept_init(LIP, LPort, BalancerPid) ->
+    {ok, ParsedIP} = inet:parse_address(LIP),
+    {ok, LSock} = gen_tcp:listen(LPort, [{ip, ParsedIP}, binary, {backlog, 256},
 					 {nodelay, true}, {reuseaddr, true},
 					 {active, false}]),
     acceptor(LSock, BalancerPid).

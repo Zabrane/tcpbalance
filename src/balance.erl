@@ -44,9 +44,9 @@
 start() ->
     %% io:format("XXX ~w:start/0\n", [?MODULE]),
     start(xxxwhocares, []).
-start(_Type, []) ->
+start(Type, []) ->
     %% io:format("XXX ~w:start/2 []\n", [?MODULE]),
-    start(xxxwhocares, [local_tcp_port(), be_conn_timeout(),
+    start(Type, [balance, local_tcp_ip(), local_tcp_port(), be_conn_timeout(),
 			be_inactivity_timeout()]);
 start(_Type, StartArgs) ->
     %% io:format("XXX ~w:start/2 Type = ~w, StartArgs = ~w\n", [?MODULE, Type, StartArgs]),
@@ -69,6 +69,9 @@ stop(_State) ->
 %%%----------------------------------------------------------------------
 %%% Internal functions
 %%%----------------------------------------------------------------------
+
+local_tcp_ip() ->
+    get_app_env(?BALANCER_APP, local_tcp_ip, "0.0.0.0").
 
 local_tcp_port() ->
     get_app_env(?BALANCER_APP, local_tcp_port, 3632).

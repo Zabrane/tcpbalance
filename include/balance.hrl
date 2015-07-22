@@ -13,3 +13,19 @@
 
 %% Atom used to inform tcp_proxy proc that no backends are available.
 -define(TIMEOUT_BE, timeout_be).
+
+%% State of a single back-end host
+-record(be, {
+      id,                   % Identifier for multiple names per host
+	  name,					% Name/IP string or IP tuple
+	  port,					% TCP port number
+	  status,				% up|down
+	  maxconn,				% Maximum connections
+	  pendconn = 0,				% Pending connections
+	  actconn = 0,				% Active connections
+	  lasterr,				% Last error (term)
+	  lasterrtime,				% Timestamp of last error
+	  act_count = 0,			% Times backend has been active
+	  act_time = 0,				% Cumulative activity time
+	  pidlist = []				% Pending & active pid list
+	 }).

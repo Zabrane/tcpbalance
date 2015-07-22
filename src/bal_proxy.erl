@@ -40,21 +40,6 @@
 	  wait_list				% List of waiting clients
 	 }).
 
-%% State of a single back-end host
--record(be, {
-	  name,					% Name/IP string or IP tuple
-	  port,					% TCP port number
-	  status,				% up|down
-	  maxconn,				% Maximum connections
-	  pendconn = 0,				% Pending connections
-	  actconn = 0,				% Active connections
-	  lasterr,				% Last error (term)
-	  lasterrtime,				% Timestamp of last error
-	  act_count = 0,			% Times backend has been active
-	  act_time = 0,				% Cumulative activity time
-	  pidlist = []				% Pending & active pid list
-	 }).
-
 %%%----------------------------------------------------------------------
 %%% API
 %%%----------------------------------------------------------------------
@@ -87,17 +72,17 @@ get_state(BalancerPid) ->
     gen_server:call(BalancerPid, {get_state},infinity).
 
 %% Get the status summary for a particular back-end host.
-get_host(BalancerPid, Host) ->
-    gen_server:call(BalancerPid, {get_host, Host},infinity).
+get_host(BalancerPid, Id) ->
+    gen_server:call(BalancerPid, {get_host, Id},infinity).
 
 %% Reset a back-end host's status to 'up'
-reset_host(BalancerPid, Host) ->
-    gen_server:call(BalancerPid, {reset_host, Host},infinity).
+reset_host(BalancerPid, Id) ->
+    gen_server:call(BalancerPid, {reset_host, Id},infinity).
 
 %% Reset a back-end host's status to Status
 %% Status = up|down
-reset_host(BalancerPid, Host, Status) ->
-    gen_server:call(BalancerPid, {reset_host, Host, Status},infinity).
+reset_host(BalancerPid, Id, Status) ->
+    gen_server:call(BalancerPid, {reset_host, Id, Status},infinity).
 
 %% Reset all back-end hosts' status to 'up'
 reset_all(BalancerPid) ->
@@ -109,12 +94,12 @@ reset_all(BalancerPid) ->
 %% NOTE: There is a limited attempt to check that NewBE is a sanely-
 %%       formatted "be" record, but it's still possible to send a
 %%       bogus "be" record to the balancer.  Caveat utilitor.
-add_be(BalancerPid, #be{}=NewBE, AfterHost) ->
-    gen_server:call(BalancerPid, {add_be, NewBE, AfterHost},infinity).
+add_be(BalancerPid, #be{}=NewBE, AfterId) ->
+    gen_server:call(BalancerPid, {add_be, NewBE, AfterId},infinity).
 
 %% Delete a back-end host from the balancer's list.
-del_be(BalancerPid, Host) ->
-    gen_server:call(BalancerPid, {del_be, Host},infinity).
+del_be(BalancerPid, Id) ->
+    gen_server:call(BalancerPid, {del_be, Id},infinity).
 
 %%%----------------------------------------------------------------------
 %%% Callback functions from gen_server
@@ -180,31 +165,31 @@ handle_call({Pid, remote_host, error, Error}, _From, State) ->
 handle_call({get_state}, _From, State) ->
     Reply = State,
     {reply, Reply, State};
-handle_call({get_host, Host}, _From, State) ->
-    Reply = lists:keysearch(Host, #be.name, State#state.be_list),
+handle_call({get_host, Id}, _From, State) ->
+    Reply = lists:keysearch(Id, #be.id, State#state.be_list),
     {reply, Reply, State};
-handle_call({reset_host, Host}, _From, State) ->
-    {Reply, NewState} = reset_be(Host, State, up),
+handle_call({reset_host, Id}, _From, State) ->
+    {Reply, NewState} = reset_be(Id, State, up),
     {reply, Reply, NewState};
-handle_call({reset_host, Host, up}, _From, State) ->
-    {Reply, NewState} = reset_be(Host, State, up),
+handle_call({reset_host, Id, up}, _From, State) ->
+    {Reply, NewState} = reset_be(Id, State, up),
     %% This is a dirty trick.  :-) Since we know that a backend is now
     %% up and available, we'll send a process exit message to ourself.
     %% Receipt of such a message will trigger the first waiter, if
     %% any, to be assigned a backend.
     self() ! {'EXIT', no_such_pid, another_host_is_up_now},
     {reply, Reply, NewState};
-handle_call({reset_host, Host, down}, _From, State) ->
-    {Reply, NewState} = reset_be(Host, State, down),
+handle_call({reset_host, Id, down}, _From, State) ->
+    {Reply, NewState} = reset_be(Id, State, down),
     {reply, Reply, NewState};
 handle_call({reset_all}, _From, State) ->
     {Reply, NewState} = reset_all_bes(State),
     {reply, Reply, NewState};
-handle_call({add_be, NewBE, AfterHost}, _From, State) ->
-    {Reply, NewState} = do_add_be(State, NewBE, AfterHost),
+handle_call({add_be, NewBE, AfterId}, _From, State) ->
+    {Reply, NewState} = do_add_be(State, NewBE, AfterId),
     {reply, Reply, NewState};
-handle_call({del_be, Host}, _From, State) ->
-    {Reply, NewState} = do_del_be(State, Host),
+handle_call({del_be, Id}, _From, State) ->
+    {Reply, NewState} = do_del_be(State, Id),
     {reply, Reply, NewState};
 handle_call(Request, From, State) ->
     error_logger:format("~s:handle_call: got ~w from ~w\n", [?MODULE, Request, From]),
@@ -376,11 +361,18 @@ update_be(B, Pid, ok) ->
 	 pidlist = lists:keyreplace(Pid, 2, B#be.pidlist, {active,Pid,now()})};
 update_be(B, Pid, exited) ->
     Active = B#be.actconn,
-    {value, {active, Pid, StartTime}} = lists:keysearch(Pid, 2, B#be.pidlist),
-    Elapsed = calc_elapsed(StartTime, now()),
-    B#be{actconn = Active - 1,
-	 act_time = B#be.act_time + Elapsed,
-	 pidlist = lists:keydelete(Pid, 2, B#be.pidlist)};
+	% {value,{pending,<0.172.0>}}
+    case lists:keysearch(Pid, 2, B#be.pidlist) of
+		{value, {active, Pid, StartTime}} ->
+    		Elapsed = calc_elapsed(StartTime, now()),
+    		B#be{actconn = Active - 1,
+	 			 act_time = B#be.act_time + Elapsed,
+	 		     pidlist = lists:keydelete(Pid, 2, B#be.pidlist)};
+		 {value,{pending,Pid}} ->
+			 Pending = B#be.pendconn,
+			 B#be{pendconn = Pending - 1,
+ 	 		      pidlist = lists:keydelete(Pid, 2, B#be.pidlist)}
+	end;
 update_be(B, Pid, ErrorStatus) ->
     error_logger:format("update_be: Pid ~w for host ~s ~w, error status ~w\n", [Pid, B#be.name, B#be.port, ErrorStatus]),
     Pending = B#be.pendconn,
@@ -410,25 +402,25 @@ calc_elapsed({MSecStart, SecStart, MicroSecStart},
     (MSecFinish * 1000000 + SecFinish + MicroSecFinish / 1000000) -
     (MSecStart * 1000000 + SecStart + MicroSecStart / 1000000).
 
-reset_be(Host, State, Status) ->
-    NewBEList = reset_be(Host, State#state.be_list, Status, []),
+reset_be(Id, State, Status) ->
+    NewBEList = reset_be(Id, State#state.be_list, Status, []),
     {ok, State#state{be_list = NewBEList}}.
-reset_be(_Host, [], _Status, BEList) ->
+reset_be(_Id, [], _Status, BEList) ->
     lists:reverse(BEList);
-reset_be(Host, [B|Bs], Status, BEList) ->
-    case B#be.name of
-	Host ->
+reset_be(Id, [B|Bs], Status, BEList) ->
+    case B#be.id of
+	Id ->
 	    lists:reverse([B#be{status = Status,
 				%% do not reset: act_count = 0, act_time = 0,
 				lasterr = reset,
 				lasterrtime = now()}|BEList], Bs);
 	_ ->
-	    reset_be(Host, Bs, Status, [B|BEList])
+	    reset_be(Id, Bs, Status, [B|BEList])
     end.
 
 reset_all_bes(State) ->
-    HostNames = [B#be.name || B <- State#state.be_list],
-    NewState = reset_each_be(HostNames, State),
+    Ids = [B#be.id || B <- State#state.be_list],
+    NewState = reset_each_be(Ids, State),
     {ok, NewState#state{start_time = now()}}.
 
 reset_each_be([], State) ->
@@ -437,44 +429,46 @@ reset_each_be([B|Bs], State) ->
     {_, NewState} = reset_be(B, State, up),
     reset_each_be(Bs, NewState).
 
-do_add_be(State, #be{}=NewBE, AfterHost) ->
+do_add_be(State, #be{}=NewBE, AfterId) ->
     case catch sane_be(NewBE) of
 	true ->
-	    case lists:keymember(NewBE#be.name, #be.name,
+	    case lists:keymember(NewBE#be.id, #be.id,
 				 State#state.be_list) of
 		true ->
-		    {{error, host_exists}, State};
+			error_logger:format("BE already exists: ~p\n", [NewBE]),
+		    {{error, id_exists}, State};
 		_ ->
 		    {ok, State#state{be_list =
-				     insert_be(NewBE, AfterHost,
+				     insert_be(NewBE, AfterId,
 					       State#state.be_list)}}
 	    end;
 	_ ->
+		error_logger:format("Not sane BE: ~p\n", [NewBE]),
 	    {{error, not_sane}, State}
     end.
 
-do_del_be(State, Host) ->
-    case lists:keymember(Host, #be.name,
+do_del_be(State, Id) ->
+    case lists:keymember(Id, #be.id,
 			 State#state.be_list) of
 	true ->
 	    {ok, State#state{be_list =
-			     lists:keydelete(Host, #be.name,
+			     lists:keydelete(Id, #be.id,
 					     State#state.be_list)}};
 	_ ->
-	    {{error, host_not_found}, State}
+	    {{error, id_not_found}, State}
     end.
 
 %%% Being lazy, no tail recursion.
 %%% Interesting, there is no such insert func in stdlib "lists" module. {shrug}
 
-insert_be(NewBE, _AfterHost, []) ->
+insert_be(NewBE, _AfterId, []) ->
     [NewBE];
 insert_be(NewBE, "", BEList) ->
     [NewBE|BEList];
-insert_be(NewBE, AfterHost, [B|Bs]) when B#be.name == AfterHost ->
+insert_be(NewBE, AfterId, [B|Bs]) when B#be.id == AfterId ->
     [B|[NewBE|Bs]];
-insert_be(NewBE, AfterHost, [B|Bs]) ->
-    [B|insert_be(NewBE, AfterHost, Bs)].
+insert_be(NewBE, AfterId, [B|Bs]) ->
+    [B|insert_be(NewBE, AfterId, Bs)].
 
 %%% QQQ Is there a less brute-force-ish way to do this?
 sane_be(#be{}=B) ->
@@ -482,6 +476,7 @@ sane_be(#be{}=B) ->
     if
 	size(B) =/= size(Real) -> false;	% XXX Should use record_info()
 	%% not list(B#be.name) -> false;
+	not is_atom(B#be.id) -> false;
 	B#be.name == "" -> false;
 	B#be.port =< 0 -> false;
 	%% not atom(B#be.status) -> false;
@@ -566,6 +561,7 @@ format_be_list([B|Bs], Acc) ->
 		  end,
     format_be_list(Bs, [[
 			 "<tr> ",
+			 io_lib:format("<td> ~s ", [B#be.id]),
 			 io_lib:format("<td> ~s ", [B#be.name]),
 			 io_lib:format("<td> ~w ", [B#be.port]),
 			 io_lib:format("<td> ~w ", [B#be.status]),

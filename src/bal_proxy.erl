@@ -26,20 +26,6 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
-%% Overall state of the proxy
--record(state, {
-	  register_name,            % Named pid of proxy
-	  local_ip, 			    % Local IP address
-	  local_port,				% Local TCP port number
-	  conn_timeout = (1*1000),		% Connection timeout (ms)
-	  act_timeout = (120*1000),		% Activity timeout (ms)
-	  be_list,				% Back-end list
-	  acceptor,				% Pid of listener proc
-	  start_time,				% Proxy start timestamp
-	  to_timer,				% Timeout timer ref
-	  wait_list				% List of waiting clients
-	 }).
-
 %%%----------------------------------------------------------------------
 %%% API
 %%%----------------------------------------------------------------------
@@ -132,7 +118,7 @@ init({RegisterName, LocalIP, LocalPort, ConnTimeout, ActTimeout}) ->
     %% several seconds ago.
     %%
     {ok, TOTimer} = timer:send_interval(1000, {check_waiter_timeouts}),
-    {ok, #state{register_name = RegisterName, local_ip = LocalIP, local_port = LocalPort, conn_timeout = ConnTimeout,
+    {ok, #bp_state{register_name = RegisterName, local_ip = LocalIP, local_port = LocalPort, conn_timeout = ConnTimeout,
 		act_timeout = ActTimeout, wait_list = queue:new(),
 		be_list = get_be_list(), start_time = now(),
 		to_timer = TOTimer, acceptor = Pid}}.
@@ -166,7 +152,7 @@ handle_call({get_state}, _From, State) ->
     Reply = State,
     {reply, Reply, State};
 handle_call({get_host, Id}, _From, State) ->
-    Reply = lists:keysearch(Id, #be.id, State#state.be_list),
+    Reply = lists:keysearch(Id, #be.id, State#bp_state.be_list),
     {reply, Reply, State};
 handle_call({reset_host, Id}, _From, State) ->
     {Reply, NewState} = reset_be(Id, State, up),
@@ -212,12 +198,12 @@ handle_cast(Msg, State) ->
 %%          {noreply, State, Timeout} |
 %%          {stop, Reason, State}            (terminate/2 is called)
 %%----------------------------------------------------------------------
-handle_info({'EXIT', Pid, shutdown}, State) when Pid == State#state.acceptor ->
+handle_info({'EXIT', Pid, shutdown}, State) when Pid == State#bp_state.acceptor ->
     error_logger:format("~s:handle_info: acceptor pid ~w shutdown\n",
 			[?MODULE, Pid]),
     {stop, normal, State};
 handle_info({'EXIT', Pid, Reason}, State) ->
-    case State#state.acceptor of
+    case State#bp_state.acceptor of
 	Pid ->
 	    %% Acceptor died but not because of shutdown request.
 	    error_logger:format("~s:handle_info: acceptor pid ~w died, reason = ~w\n",
@@ -232,12 +218,12 @@ handle_info({'EXIT', Pid, Reason}, State) ->
 	    %% queue, assuming that an empty queue looks like {[], []}.
 	    %% We wouldn't need this hack if a function like queue:size()
 	    %% were available....
-	    case NewState#state.wait_list of
+	    case NewState#bp_state.wait_list of
 		{[], []} ->
 		    {noreply, NewState};
 		_ ->
 		    {{value, {From, FromPid, _InsTime}}, NewQ} =
-			queue:out(NewState#state.wait_list),
+			queue:out(NewState#bp_state.wait_list),
 		    {Reply, NewState2} = choose_backend(From,FromPid,NewState),
 		    case Reply of
 			?MUST_WAIT ->
@@ -246,7 +232,7 @@ handle_info({'EXIT', Pid, Reason}, State) ->
 			    %% Send our async reply to the
 			    %% patiently-waiting client.
 			    gen_server:reply(From, Reply),
-			    {noreply, NewState2#state{wait_list = NewQ}}
+			    {noreply, NewState2#bp_state{wait_list = NewQ}}
 		    end
 	    end
     end;
@@ -263,7 +249,7 @@ handle_info(Info, State) ->
 %% Returns: any (ignored by gen_server)
 %%----------------------------------------------------------------------
 terminate(_Reason, State) ->
-    timer:cancel(State#state.to_timer),
+    timer:cancel(State#bp_state.to_timer),
     ok.
 
 %%----------------------------------------------------------------------
@@ -294,18 +280,18 @@ get_be_list() ->
 choose_backend(From, FromPid, State) ->
     case choose_be(FromPid, State) of
 	{ok, RHost, RPort, NewBEList} ->
-	    Reply = {ok, RHost, RPort, State#state.conn_timeout,
-		     State#state.act_timeout},
-	    {Reply, State#state{be_list = NewBEList}};
+	    Reply = {ok, RHost, RPort, State#bp_state.conn_timeout,
+		     State#bp_state.act_timeout},
+	    {Reply, State#bp_state{be_list = NewBEList}};
 	_ ->
-	    Q = queue:in({From, FromPid, nowtime()}, State#state.wait_list),
-	    {?MUST_WAIT, State#state{wait_list = Q}}
+	    Q = queue:in({From, FromPid, nowtime()}, State#bp_state.wait_list),
+	    {?MUST_WAIT, State#bp_state{wait_list = Q}}
     end.
 
 %% Find the first available back-end host
 
 choose_be(FromPid, State) ->
-    choose_be(FromPid, State#state.be_list, []).
+    choose_be(FromPid, State#bp_state.be_list, []).
 choose_be(_FromPid, [], _BEList) ->
     sorry;
 choose_be(FromPid, [B|Bs], BEList) ->
@@ -333,14 +319,14 @@ choose_be(FromPid, [B|Bs], BEList) ->
 
 update_host(State, Pid, Status) ->
     {BEList, WaitList} =
-	case update_belist(State#state.be_list, [], Pid, Status) of
+	case update_belist(State#bp_state.be_list, [], Pid, Status) of
 	    {ok, NewBEList} ->
-		{NewBEList, State#state.wait_list};
+		{NewBEList, State#bp_state.wait_list};
 	    {notfound, _} ->
-		NewQ = remove_from_wait_list(Pid, State#state.wait_list),
-		{State#state.be_list, NewQ}
+		NewQ = remove_from_wait_list(Pid, State#bp_state.wait_list),
+		{State#bp_state.be_list, NewQ}
 	end,
-    State#state{be_list = BEList, wait_list = WaitList}.
+    State#bp_state{be_list = BEList, wait_list = WaitList}.
 
 update_belist([], BEList, _Pid, _Status) ->
     {notfound, lists:reverse(BEList)};
@@ -403,8 +389,8 @@ calc_elapsed({MSecStart, SecStart, MicroSecStart},
     (MSecStart * 1000000 + SecStart + MicroSecStart / 1000000).
 
 reset_be(Id, State, Status) ->
-    NewBEList = reset_be(Id, State#state.be_list, Status, []),
-    {ok, State#state{be_list = NewBEList}}.
+    NewBEList = reset_be(Id, State#bp_state.be_list, Status, []),
+    {ok, State#bp_state{be_list = NewBEList}}.
 reset_be(_Id, [], _Status, BEList) ->
     lists:reverse(BEList);
 reset_be(Id, [B|Bs], Status, BEList) ->
@@ -419,9 +405,9 @@ reset_be(Id, [B|Bs], Status, BEList) ->
     end.
 
 reset_all_bes(State) ->
-    Ids = [B#be.id || B <- State#state.be_list],
+    Ids = [B#be.id || B <- State#bp_state.be_list],
     NewState = reset_each_be(Ids, State),
-    {ok, NewState#state{start_time = now()}}.
+    {ok, NewState#bp_state{start_time = now()}}.
 
 reset_each_be([], State) ->
     State;
@@ -433,14 +419,14 @@ do_add_be(State, #be{}=NewBE, AfterId) ->
     case catch sane_be(NewBE) of
 	true ->
 	    case lists:keymember(NewBE#be.id, #be.id,
-				 State#state.be_list) of
+				 State#bp_state.be_list) of
 		true ->
 			error_logger:format("BE already exists: ~p\n", [NewBE]),
 		    {{error, id_exists}, State};
 		_ ->
-		    {ok, State#state{be_list =
+		    {ok, State#bp_state{be_list =
 				     insert_be(NewBE, AfterId,
-					       State#state.be_list)}}
+					       State#bp_state.be_list)}}
 	    end;
 	_ ->
 		error_logger:format("Not sane BE: ~p\n", [NewBE]),
@@ -449,11 +435,11 @@ do_add_be(State, #be{}=NewBE, AfterId) ->
 
 do_del_be(State, Id) ->
     case lists:keymember(Id, #be.id,
-			 State#state.be_list) of
+			 State#bp_state.be_list) of
 	true ->
-	    {ok, State#state{be_list =
+	    {ok, State#bp_state{be_list =
 			     lists:keydelete(Id, #be.id,
-					     State#state.be_list)}};
+					     State#bp_state.be_list)}};
 	_ ->
 	    {{error, id_not_found}, State}
     end.
@@ -492,9 +478,9 @@ sane_be(_B) ->
     false.
 
 check_waiter_timeouts(State) ->
-    TOTime = nowtime() - (State#state.conn_timeout / 1000),
-    NewQ = zap_timeout_q(TOTime, State#state.wait_list),
-    State#state{wait_list = NewQ}.
+    TOTime = nowtime() - (State#bp_state.conn_timeout / 1000),
+    NewQ = zap_timeout_q(TOTime, State#bp_state.wait_list),
+    State#bp_state{wait_list = NewQ}.
 zap_timeout_q(TOTime, Q) ->
     zap_timeout_q(TOTime, Q, queue:new()).
 zap_timeout_q(TOTime, Q, NewQ) ->
@@ -526,17 +512,17 @@ http_get_state(_Env, _Input) ->
 
 format_proxy_state(State) ->
     %% QQQ Icky counting code
-    {L1, L2} = State#state.wait_list,
+    {L1, L2} = State#bp_state.wait_list,
     [
      "<pre>\n",
      %% From README: insert line here!
-     io_lib:format("Proxy start time: ~s\n", [fmt_date(State#state.start_time)]),
+     io_lib:format("Proxy start time: ~s\n", [fmt_date(State#bp_state.start_time)]),
      io_lib:format("Current time:     ~s\n", [fmt_date(now())]),
-	 io_lib:format("Name: ~s\n", [State#state.register_name]),
-	 io_lib:format("Local IP address: ~s\n", [State#state.local_ip]),
-     io_lib:format("Local TCP port number: ~w\n", [State#state.local_port]),
-     io_lib:format("Connection timeout (seconds): ~w\n", [State#state.conn_timeout / 1000]),
-     io_lib:format("Activity timeout (seconds): ~w\n", [State#state.act_timeout / 1000]),
+	 io_lib:format("Name: ~s\n", [State#bp_state.register_name]),
+	 io_lib:format("Local IP address: ~s\n", [State#bp_state.local_ip]),
+     io_lib:format("Local TCP port number: ~w\n", [State#bp_state.local_port]),
+     io_lib:format("Connection timeout (seconds): ~w\n", [State#bp_state.conn_timeout / 1000]),
+     io_lib:format("Activity timeout (seconds): ~w\n", [State#bp_state.act_timeout / 1000]),
      io_lib:format("Length of wait list: ~w\n", [length(L1) + length(L2)]),
      "</pre>\n",
      "<table>\n",
@@ -546,7 +532,7 @@ format_proxy_state(State) ->
 				       "LastErrTime", "ActiveCount",
 				       "ActiveTime"]],
      "\n",
-     format_be_list(State#state.be_list),
+     format_be_list(State#bp_state.be_list),
      "</table>\n"
     ].
 

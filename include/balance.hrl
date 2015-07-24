@@ -29,3 +29,17 @@
 	  act_time = 0,				% Cumulative activity time
 	  pidlist = []				% Pending & active pid list
 	 }).
+
+%% Overall state of the proxy
+-record(bp_state, {
+	  register_name,            % Named pid of proxy
+	  local_ip, 			    % Local IP address
+	  local_port,				% Local TCP port number
+	  conn_timeout = (1*1000),		% Connection timeout (ms)
+	  act_timeout = (120*1000),		% Activity timeout (ms)
+	  be_list,				% Back-end list
+	  acceptor,				% Pid of listener proc
+	  start_time,				% Proxy start timestamp
+	  to_timer,				% Timeout timer ref
+	  wait_list				% List of waiting clients
+	 }).

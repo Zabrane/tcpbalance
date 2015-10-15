@@ -300,6 +300,10 @@ choose_be(FromPid, [B|Bs], BEList) ->
 	    NewB = B#be{pendconn = B#be.pendconn + 1,
 			pidlist = [{pending, FromPid}|B#be.pidlist]},
 	    NewBEList = lists:reverse(BEList ++ [NewB], Bs),
+		io:format("B: ~p", B),
+		io:format("Bs: ~p", Bs),
+		io:format("BEList: ~p", BEList),
+		io:format("NewBEList: ~p", NewBEList),
 	    {ok, B#be.name, B#be.port, NewBEList};
 	true ->
 	    choose_be(FromPid, Bs, [B|BEList])

@@ -299,7 +299,7 @@ choose_be(FromPid, [B|Bs], BEList) ->
 	B#be.status == up, (B#be.pendconn + B#be.actconn < B#be.maxconn) ->
 	    NewB = B#be{pendconn = B#be.pendconn + 1,
 			pidlist = [{pending, FromPid}|B#be.pidlist]},
-	    NewBEList = lists:reverse([BEList] ++ [NewB], Bs),
+	    NewBEList = lists:reverse(BEList ++ [NewB], Bs),
 	    {ok, B#be.name, B#be.port, NewBEList};
 	true ->
 	    choose_be(FromPid, Bs, [B|BEList])

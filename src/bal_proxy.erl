@@ -299,11 +299,12 @@ choose_be(FromPid, [B|Bs], BEList) ->
 	B#be.status == up, (B#be.pendconn + B#be.actconn < B#be.maxconn) ->
 	    NewB = B#be{pendconn = B#be.pendconn + 1,
 			pidlist = [{pending, FromPid}|B#be.pidlist]},
-	    NewBEList = lists:reverse(BEList ++ [NewB], Bs),
-		io:format("B: ~p", B),
-		io:format("Bs: ~p", Bs),
-		io:format("BEList: ~p", BEList),
-		io:format("NewBEList: ~p", NewBEList),
+	    % NewBEList = lists:reverse([NewB | Bs], BEList),
+		NewBEList = Bs ++ [NewB] ++ BEList,
+		io:format("B: ~p~n", [B]),
+		io:format("Bs: ~p~n", [Bs]),
+		io:format("BEList: ~p~n", [BEList]),
+		io:format("NewBEList: ~p~n", [NewBEList]),
 	    {ok, B#be.name, B#be.port, NewBEList};
 	true ->
 	    choose_be(FromPid, Bs, [B|BEList])

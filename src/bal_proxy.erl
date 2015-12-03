@@ -360,6 +360,10 @@ update_be(B, Pid, exited) ->
 			 B#be{pendconn = Pending - 1,
  	 		      pidlist = lists:keydelete(Pid, 2, B#be.pidlist)}
 	end;
+%% Sometimes a backend is added before the host is actually available; don't remove it from the pool yet
+update_be(B, Pid, {error,econnrefused}=ErrorStatus) ->
+    error_logger:format("update_be: Pid ~w for host ~s ~w, error status ~w\n", [Pid, B#be.name, B#be.port, ErrorStatus]),
+    B#be{lasterr = ErrorStatus, lasterrtime = now()};
 update_be(B, Pid, ErrorStatus) ->
     error_logger:format("update_be: Pid ~w for host ~s ~w, error status ~w\n", [Pid, B#be.name, B#be.port, ErrorStatus]),
     Pending = B#be.pendconn,
